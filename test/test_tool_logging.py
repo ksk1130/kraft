@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """tool_logging の強化版をテストするスクリプト."""
 
+import subprocess
 import sys
 from pathlib import Path
 import time
@@ -8,6 +9,7 @@ import time
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+from kraft.agent import bash
 from kraft.tools.tool_logging import (
     log_tool_start,
     log_tool_success,
@@ -59,6 +61,43 @@ def test_decorator():
         error_example()
     except RuntimeError:
         pass
+
+
+def test_bash_streams_output_to_terminal(monkeypatch, capsys):
+    """bash は実行中の出力を表示し、最終結果も返す。"""
+
+    class FakeStdout:
+        def __init__(self, lines):
+            self._lines = iter(lines)
+
+        def readline(self):
+            try:
+                return next(self._lines)
+            except StopIteration:
+                return ""
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            self.stdout = FakeStdout(["hello\n", "world\n"])
+
+        def poll(self):
+            return 0
+
+        def wait(self):
+            return 0
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+
+    result = bash("echo hello && echo world", shell="powershell")
+    captured = capsys.readouterr()
+
+    assert "echo hello && echo world" in captured.out
+    assert "hello" in captured.out
+    assert "world" in captured.out
+    assert result == "hello\nworld"
 
 
 if __name__ == "__main__":

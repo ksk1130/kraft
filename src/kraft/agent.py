@@ -13,10 +13,12 @@ from deepagents.middleware import MemoryMiddleware, SkillsMiddleware, Filesystem
 from kraft.tools import file_read, file_read_advanced, grep_search
 from kraft.tools.file_editor_wrapper import edit_file  # DeepAgents の edit_file と同名で差分表示を強制
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional, Any
 import json
 from datetime import datetime
+import time
 import uuid
 
 
@@ -382,11 +384,15 @@ def letter_counter(word: str, letter: str) -> int:
 def bash(command: str, shell: str = "powershell") -> str:
     """
     Windows PowerShell または Git Bash でコマンドを実行する。
-    
+
+    実行中の標準出力をターミナルへ流し、ユーザーが何を実行しているか
+    確認できるようにする。ただし最終的な戻り値としては、実行結果文字列
+    をそのまま返す。
+
     Args:
         command: 実行するコマンド文字列
         shell: 実行シェル。"powershell" (デフォルト) または "gitbash"
-    
+
     Returns:
         コマンド実行結果の標準出力、またはエラーメッセージ
     """
@@ -394,7 +400,7 @@ def bash(command: str, shell: str = "powershell") -> str:
         # シェルの選択
         if shell.lower() == "gitbash":
             # Git Bash で実行
-            cmd = [r"C:\Program Files\Git\bin\bash.exe", "-c", command]
+            cmd = [r"C:\Program Files\Git\bin\bash.exe", "-lc", command]
             encoding = "utf-8"
         elif shell.lower() == "powershell":
             # PowerShell で実行（デフォルト）
@@ -402,32 +408,52 @@ def bash(command: str, shell: str = "powershell") -> str:
             encoding = "utf-8"
         else:
             return f"[NG] 不明なシェル: {shell}。'powershell' または 'gitbash' を指定してください"
-        
-        # バイナリモードで実行してから手動でデコード（エラーハンドリング付き）
-        result = subprocess.run(
+
+        print(f"$ {command}")
+        sys.stdout.flush()
+
+        process = subprocess.Popen(
             cmd,
-            capture_output=True,
-            text=False,  # バイナリで受け取る
-            timeout=30
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            encoding=encoding,
+            errors="replace",
+            bufsize=1,
         )
-        
-        # デコード時にエラーを置換
-        stdout_text = result.stdout.decode(encoding, errors="replace")
-        stderr_text = result.stderr.decode(encoding, errors="replace")
-        # デコード時にエラーを置換
-        stdout_text = result.stdout.decode(encoding, errors="replace")
-        stderr_text = result.stderr.decode(encoding, errors="replace")
-        
-        # サロゲートペアを削除して正規化
-        stdout_text = stdout_text.encode("utf-8", errors="replace").decode("utf-8")
-        stderr_text = stderr_text.encode("utf-8", errors="replace").decode("utf-8")
-        
-        if result.returncode == 0:
-            return stdout_text.strip() if stdout_text.strip() else "[OK] コマンドが正常に実行されました"
-        else:
-            error_msg = stderr_text.strip() or stdout_text.strip()
-            return f"[NG] エラー (終了コード {result.returncode}):\n{error_msg}"
-    
+
+        if process.stdout is None:
+            return "[NG] コマンドの標準出力を取得できませんでした"
+
+        output_chunks: list[str] = []
+        deadline = time.monotonic() + 30
+        while True:
+            chunk = process.stdout.readline()
+            if chunk:
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
+                output_chunks.append(chunk)
+                continue
+
+            if process.poll() is not None:
+                break
+
+            if time.monotonic() >= deadline:
+                process.kill()
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
+
+            time.sleep(0.05)
+
+        returncode = process.wait()
+        output_text = "".join(output_chunks).strip()
+
+        if returncode == 0:
+            return output_text if output_text else "[OK] コマンドが正常に実行されました"
+
+        error_msg = output_text
+        return f"[NG] エラー (終了コード {returncode}):\n{error_msg}"
+
     except subprocess.TimeoutExpired:
         return "[NG] コマンド実行がタイムアウトしました（30秒）"
     except Exception as e:
