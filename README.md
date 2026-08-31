@@ -1,146 +1,73 @@
 # kraft
 
-Python ベースの CLI/エージェント実験用プロジェクトです。DeepAgents ミドルウェアを中心に、スキル検索・ツール呼び出し・HITL 承認を扱えるようにしています。
+Python ベースの CLI / エージェント実験プロジェクトです。
+`DeepAgents` を中心に、ファイルアクセス、メモリ注入、スキル検索、HITL（Human In The Loop）承認を組み合わせた開発支援フローを提供します。
 
 ## 概要
 
-- **DeepAgents ミドルウェア統合**: FilesystemMiddleware、MemoryMiddleware、SkillsMiddleware により、ファイル操作・エージェントメモリ・スキル管理を自動化
-- **マルチバックエンド**: StateBackend（メモリ） + FilesystemBackend（ファイルI/O） を CompositeBackend で統合
-- **スキルソース一本化**: デフォルトは `%USERPROFILE%\.claude\skills`、`KRAFT_SKILLS_DIR` で上書き可能
-- スキルを自動ロードして LLM に提供する
-- `bash`、`file_editor`、`grep_search` などのツールを組み込む
-- DeepAgents の `interrupt_on` による承認フローを利用する
-- ワークスペースはカレントディレクトリを基準にし、ユーザー作業ファイルはそこに置く
-- `%USERPROFILE%\.kraft` はセッション履歴やメタデータ用に使用する
+- `DeepAgents` のミドルウェアを利用して、ファイル操作・メモリ参照・スキル読み込みを構成する
+- ワークスペースを `KRAFT_WORKSPACE_ROOT` で固定し、安全にファイルを扱う
+- `AGENTS.md` と `SKILL.md` を自動的に取り込み、LLM のコンテキストとして使う
+- `bash` / `edit_file` / `grep_search` / `read_file` 系ツールの実行前に承認フローを挟む
+- セッション単位で会話履歴を保存し、以前の状態へ再開できる
 
 ## 主要機能
 
-### 1. DeepAgents ミドルウェアシステム
+### 1. DeepAgents ミドルウェア
 
-エージェント初期化時に 3 つのミドルウェアを自動構成:
+`build_agent_app()` で以下を組み合わせます。
 
-#### FilesystemMiddleware
-- ファイルシステム操作ツール (`ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`) を自動提供
-- `backend` パラメータで CompositeBackend と連携
-- ファイルアクセスは root_dir（KRAFT_WORKSPACE_ROOT）に制限
+- `FilesystemMiddleware`
+  - ファイル読み書き・検索・編集用ツールを提供
+  - `KRAFT_WORKSPACE_ROOT` を root として制限
+- `MemoryMiddleware`
+  - `AGENTS.md` を読む
+  - 記憶や作業方針をシステムプロンプトへ注入
+- `SkillsMiddleware`
+  - `KRAFT_SKILLS_DIR` または既定の `%USERPROFILE%\.claude\skills` を探索
+  - `SKILL.md` を検出してスキル情報を読み込む
 
-#### MemoryMiddleware
-- `AGENTS.md` またはカスタムメモリファイルを読み込み、システムプロンプトに自動注入
-- `KRAFT_MEMORY_FILE` で上書き可能（デフォルト: `"AGENTS.md"`）
-- エージェントメモリ機能を提供
+### 2. HITL 承認フロー
 
-#### SkillsMiddleware
-- デフォルトでは `%USERPROFILE%\.claude\skills` をスキルソースとして利用
-- `KRAFT_SKILLS_DIR` が設定されていると、それを優先して読み込み
-- `SKILL.md` を自動探索し、スキルメタデータをシステムプロンプトに常駐化
-- 起動時に読み込まれたスキルの一覧を表示可能
+危険なツール実行の前に承認を求めます。`interrupt_on` の設定で、特に `bash` / `edit_file` を停止対象にし、UI には `approval/hitl_prompt.py` を使います。
 
-> `SkillManager` は後方互換のため残していますが、現在の実装ではスキルの実体は `SkillsMiddleware` と同じソース解決に統一されています。
+### 3. セッション管理
 
-### 1.5 スキル管理（統一ソース方式）
+`src/kraft/agent.py` の `SessionManager` が会話履歴を `~/.kraft/sessions/<session_id>/` に保存し、再開・一覧表示・タイトル生成を行います。
 
-スキルの検索・列挙・表示は `SkillsMiddleware` のソース解決に統一されており、起動時に読み込まれたスキル一覧をそのまま利用できます。
+### 4. スキルの自動探索
 
 - 既定スキルソース: `%USERPROFILE%\.claude\skills`
-- 上書き: `KRAFT_SKILLS_DIR`
-- 提供機能:
-  - スキル一覧表示
-  - 検索
-  - 詳細取得
-  - LLM プロンプトへの自動コンテキスト注入
+- 環境変数 `KRAFT_SKILLS_DIR` で上書き可能
+- `discover_skills()` と `resolve_skills_dir()` で探索先を統一
 
-### 2. ツール群
+## クイックスタート
 
-実装済みの主要ツール:
-
-- `read_skill(skill_name)`
-- `bash(command, shell="powershell")`
-- `file_editor(operation)`
-- `grep_search(pattern, path=".", recursive=True, case_sensitive=False, max_results=20)`
-- `file_read(...)`
-- `file_read_advanced(...)`
-
-### 3. DeepAgents + HITL
-
-`build_agent_app()` で DeepAgents を生成し、次のように承認対象を設定しています。
-
-```python
-interrupt_on={
-    "bash": True,
-    "write_file": True,
-    "edit_file": True,
-    "read_file": False,
-}
-```
-
-承認はミドルウェア側で行い、見た目は `src/kraft/approval/hitl_prompt.py` の UI を使って表示します。
-
-### 4. バックエンド構成
-
-マルチバックエンド設定により、異なる種類のデータストレージを統合:
-
-```python
-# メモリストレージ（エージェント状態用）
-state_backend = StateBackend()
-
-# ファイルシステムストレージ（WORKSPACE_DIR に制限）
-file_backend = FilesystemBackend(root_dir=WORKSPACE_DIR)
-
-# ルーティングバックエンド（複数バックエンドを統合）
-backend = CompositeBackend(
-    default=state_backend,
-    routes={"/": file_backend}
-)
-```
-
-この構成により、ファイル操作は WORKSPACE_DIR 内に安全に制限されます。
-
-### 5. ワークスペース方針
-
-実装上の基準は次のとおりです。
-
-- ワークスペースの正本: カレントディレクトリ
-- `KRAFT_WORKSPACE_ROOT` があればそれを優先（FilesystemBackend の root_dir）
-- `%USERPROFILE%\.kraft`: セッション履歴・メタデータ専用
-- `KRAFT_SESSION_DIR`: セッション保存先を上書き可能
-
-```powershell
-$env:KRAFT_WORKSPACE_ROOT = "C:\path\to\workspace"
-$env:KRAFT_SESSION_DIR = "$HOME\.kraft\sessions"
-$env:KRAFT_MEMORY_FILE = "AGENTS.md"
-$env:KRAFT_SKILLS_DIR = "skills"
-```
-
-## 実行方法
-
-### 依存環境
+### 依存関係を入れる
 
 ```bash
 uv sync
 ```
 
-### 環境変数設定
+### 環境変数を設定する
 
-#### LLM 接続
-```powershell
-$env:OPENAI_API_KEY = "your-api-key"
+```bash
+export OPENAI_API_KEY="your-api-key"
+export KRAFT_WORKSPACE_ROOT="$(pwd)"
+export KRAFT_SESSION_DIR="$HOME/.kraft/sessions"
+export KRAFT_MEMORY_FILE="AGENTS.md"
+export KRAFT_SKILLS_DIR="$HOME/.claude/skills"
+export KRAFT_HITL_MODE="interactive"
 ```
 
-#### ワークスペース設定
+Windows PowerShell では:
+
 ```powershell
-# ファイル操作のルートディレクトリ（省略時: カレント）
+$env:OPENAI_API_KEY = "your-api-key"
 $env:KRAFT_WORKSPACE_ROOT = "C:\path\to\workspace"
-
-# セッション履歴の保存先（省略時: $HOME\.kraft\sessions）
 $env:KRAFT_SESSION_DIR = "$HOME\.kraft\sessions"
-
-# エージェントメモリファイル（MemoryMiddleware が読込、省略時: "AGENTS.md"）
 $env:KRAFT_MEMORY_FILE = "AGENTS.md"
-
-# スキルディレクトリ（SkillsMiddleware が読込、省略時: "$HOME\.claude\skills"）
 $env:KRAFT_SKILLS_DIR = "$HOME\.claude\skills"
-
-# HITL 動作モード（auto / interactive / strict、省略時: interactive）
 $env:KRAFT_HITL_MODE = "interactive"
 ```
 
@@ -150,52 +77,15 @@ $env:KRAFT_HITL_MODE = "interactive"
 uv run kraft
 ```
 
-## テスト
+起動時には、スキルソースとロード済みスキル数が表示されます。
 
-テストは [test](test) ディレクトリへ整理されています。
-
-```bash
-# 全テスト実行
-uv run pytest -q test
-
-# 特定のテストモジュール実行
-uv run pytest test/test_hitl_filesystem_integration.py -v
-uv run pytest test/test_agent_deepagents_hitl.py -v
-uv run pytest test/test_skill_search.py -v
-```
-
-現在の確認済み結果（DeepAgents ミドルウェア統合後）:
-
-- **11/11 PASSED** (ミドルウェア統合テスト)
-  - test_hitl_filesystem_integration.py: 2/2 PASSED
-  - test_hitl_multi_ai_message.py: 1/1 PASSED
-  - test_agent_deepagents_hitl.py: 2/2 PASSED
-  - test_skill_search.py: 6/6 PASSED
-- 0 failed
-
-### 動作確認
-
-```bash
-# スキル読込・エージェント初期化の検証
-uv run python test/test_tools.py
-```
-
-起動時には次の情報が表示されます。
-
-```text
-スキルソース: C:\Users\<user>\.claude\skills
-ロード済みスキル数: 1
-スキル: pc-boot-shutdown-times
-```
-
-この表示は `discover_skills()` と `resolve_skills_dir()` を使って実際の読み込みソースに基づいて出力されます。
-
-## プロジェクト構造
+## プロジェクト構成
 
 ```text
 kraft/
-├─ pyproject.toml
+├─ AGENTS.md
 ├─ README.md
+├─ pyproject.toml
 ├─ src/
 │  └─ kraft/
 │     ├─ __init__.py
@@ -217,61 +107,44 @@ kraft/
 ├─ test/
 │  ├─ conftest.py
 │  └─ test_*.py
-└─ .venv/
+└─ uv.lock
 ```
 
-## 実装ハイライト
+## テスト
 
-### DeepAgents ミドルウェアアーキテクチャ
+```bash
+uv run pytest -q test
+uv run pytest test/test_hitl_filesystem_integration.py -v
+uv run pytest test/test_skill_search.py -v
+```
 
-- **モジュール化**: FilesystemMiddleware、MemoryMiddleware、SkillsMiddleware により関心の分離を実現
-- **自動コンテキスト注入**: AGENTS.md と skills/ ディレクトリの内容が自動的にシステムプロンプトに統合
-- **マルチバックエンド**: CompositeBackend により、メモリとファイルシステムを透過的に組み合わせ
-- **安全なファイルアクセス**: FilesystemBackend の root_dir 制限により、ワークスペース内のアクセスのみ許可
+個別に実行する場合は、以下のような検証を行います。
 
-### 従来との主な違い
+- `test_hitl_filesystem_integration.py`: ファイル操作と HITL 承認
+- `test_hitl_multi_ai_message.py`: 複数メッセージの取り扱い
+- `test_agent_deepagents_hitl.py`: DeepAgents と承認フローの連携
+- `test_skill_search.py`: スキル検索と読み込み
 
-| 項目 | 従来（v0） | 現在（ミドルウェア対応） |
-|---|---|---|
-| ファイルツール | 手動登録 | FilesystemMiddleware で自動提供 |
-| スキル読込 | SkillManager.load() で手動 | SkillsMiddleware が自動読込 + 既定は %USERPROFILE%\.claude\skills |
-| エージェントメモリ | なし | MemoryMiddleware で AGENTS.md 読込 |
-| バックエンド | StateBackend のみ | CompositeBackend で統合 |
-| システムプロンプト | ~250行（手動構築） | ~50行（ミドルウェアが注入） |
-| 起動時表示 | なし | スキルソースとロード済みスキルを出力 |
+## 重要な設計方針
+
+- `KRAFT_WORKSPACE_ROOT` をファイルアクセスの基点にする
+- `KRAFT_SESSION_DIR` でセッション履歴の保存先を切り替えられる
+- `KRAFT_MEMORY_FILE` に指定したメモリファイルを AI に注入する
+- 重要なツール実行は常に HITL 承認前提で行う
+- README と AGENTS.md の説明内容は実装と一致させる
+
+## 便利なコマンド
+
+```bash
+uv run kraft
+uv run pytest -q test
+uv run python test/test_tools.py
+```
 
 ## 備考
 
-- Windows 環境ではコマンド出力の文字コード差異に注意する
-- HITL 承認は、標準の interrupt/resume フローを中心にしつつ、見た目は `hitl_prompt.py` を使う構成にしている
-- DeepAgents API はドキュメントと実装に乖離がある場合があるため、ソースコード検証が必須（参考: backends/composite.py, middleware/*.py）
+- `bash` 実行は PowerShell を既定シェルとして扱います
+- `edit_file` は組み込み版ではなく、差分表示付きのカスタムラッパーを優先します
+- Windows 環境では文字コード差異や PowerShell 周りの挙動に注意してください
 
-## ファイル構成の詳細
-
-### エージェント層 (`src/kraft/`)
-
-- **agent.py**: メインエージェント工場
-  - `resolve_skills_dir()`: スキルソースを解決する共通関数
-  - `discover_skills()`: 実際に読み込むスキル一覧を返す
-  - `SessionManager`: セッション履歴管理
-  - `build_agent_app()`: DeepAgents ミドルウェア統合エージェント生成
-  - ツール関数群: bash, file_editor, file_read, file_read_advanced, grep_search
-
-- **deep_agents_hitl.py**: HITL 承認フロー（interrupt/resume）
-- **display_formatter.py**: LLM 出力のフォーマッティング
-
-### 承認層 (`src/kraft/approval/`)
-
-- **tool_approval.py**: ツール呼び出し承認判定
-- **tool_config.py**: ツール設定（HITL の対象外など）
-- **hitl_prompt.py**: 承認 UI/プロンプト
-
-### ツール層 (`src/kraft/tools/`)
-
-- **file_editor_wrapper.py**: ファイル編集ツール（Windows パス対応）
-- **file_read_safe.py**: 安全なファイル読込
-- **file_read_advanced.py**: 高度なファイル読込（行指定など）
-- **grep_tool.py**: grep 実装
-- **hitl_wrapper.py**: HITL 統合ラッパー
-- **tool_logging.py**: ツール実行ログ
 
