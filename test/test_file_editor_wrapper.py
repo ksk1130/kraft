@@ -47,7 +47,7 @@ def test_file_editor():
     assert "差分" in result, "差分表示が含まれていない"
     assert "---" in result and "+++" in result and "@@" in result, "unified diff 形式になっていない"
     assert "\x1b[31m" in result and "\x1b[32m" in result, "差分の色付けがされていない"
-    assert "OLD" in result and "NEW" in result, "side-by-side プレビューが含まれていない"
+    assert "side-by-side preview" not in result, "side-by-side プレビューが残っている"
     
     # 編集結果を確認
     operation = f'view {test_file}'
@@ -115,5 +115,4 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
-
 

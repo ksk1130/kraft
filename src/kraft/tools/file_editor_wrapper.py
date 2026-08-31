@@ -49,7 +49,7 @@ def _resolve_path(path_str: str) -> Path:
 
 
 def _format_unified_diff(old_text: str, new_text: str) -> str:
-    """編集前後の差分を unified diff 形式で整形し、色付きのサイドバイサイド要約も含める。"""
+    """編集前後の差分を unified diff 形式で整形し、行種別ごとに色付けする。"""
     old_lines = old_text.splitlines(keepends=True)
     new_lines = new_text.splitlines(keepends=True)
 
@@ -77,25 +77,7 @@ def _format_unified_diff(old_text: str, new_text: str) -> str:
         else:
             colorized_lines.append(line)
 
-    old_list = old_text.splitlines()
-    new_list = new_text.splitlines()
-    preview_lines = [
-        "\x1b[36mOLD\x1b[0m | \x1b[36mNEW\x1b[0m",
-        "--------------------------------",
-    ]
-
-    max_lines = max(len(old_list), len(new_list), 1)
-    for idx in range(max_lines):
-        old_line = old_list[idx] if idx < len(old_list) else ""
-        new_line = new_list[idx] if idx < len(new_list) else ""
-        if old_line == new_line:
-            preview_lines.append(f"{old_line} | {new_line}")
-        else:
-            preview_lines.append(
-                f"\x1b[31m{old_line}\x1b[0m | \x1b[32m{new_line}\x1b[0m"
-            )
-
-    return "\n".join(colorized_lines + ["", "--- side-by-side preview ---"] + preview_lines).rstrip()
+    return "".join(colorized_lines).rstrip()
 
 
 def preview_edit_file_change(
@@ -460,4 +442,3 @@ def file_editor(operation: str) -> str:
     
     except Exception as e:
         return f"予期しないエラー: {e}"
-
