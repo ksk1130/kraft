@@ -36,9 +36,12 @@ kraft
 
 スキルソースは一元化されています。
 
-- 既定値: `%USERPROFILE%\.claude\skills`
+- repo-local 優先: `.kraft/skills` / `skills`
+- 既定グローバル: `%USERPROFILE%\.claude\skills`
 - 上書き: `KRAFT_SKILLS_DIR`
 - `discover_skills()` と `resolve_skills_dir()` で統一的に決定する
+
+repo-local のスキルは、グローバルの skill より優先される。これにより、この repository 固有の dogfood / review / triage のルールを安全に注入できる。
 
 ### 主要ツール
 
@@ -106,8 +109,15 @@ $env:KRAFT_HITL_MODE = "interactive"
 
 ```bash
 uv sync
+./scripts/dogfood.sh
 uv run kraft
 ```
+
+`./scripts/dogfood.sh` は標準的な dogfood フローをまとめたエントリーポイントです。
+- read-only の確認
+- ターゲットテストの実行
+- diff review の出力
+- 実行ログの記録
 
 ## テスト
 

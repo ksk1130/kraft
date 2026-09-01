@@ -25,6 +25,23 @@ import uuid
 DEFAULT_SKILLS_DIR = Path.home() / ".claude" / "skills"
 
 
+def repo_local_skill_dirs() -> list[Path]:
+    """repo-local なスキルディレクトリを優先順で返す。
+
+    優先順位は次の通り:
+    1. .kraft/skills
+    2. skills
+    3. ~/.claude/skills（グローバル既定値）
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates = [
+        repo_root / ".kraft" / "skills",
+        repo_root / "skills",
+        DEFAULT_SKILLS_DIR,
+    ]
+    return [candidate.resolve() for candidate in candidates]
+
+
 def normalize_text(text: str) -> str:
     """サロゲートペアを正規化して、安全な UTF-8 文字列に変換。"""
     try:
@@ -50,32 +67,59 @@ def extract_skill_description(content: str) -> str:
 
 
 def resolve_skills_dir() -> Path:
-    """スキルソースディレクトリを解決する。"""
+    """スキルソースディレクトリを解決する。
+
+    環境変数が明示されている場合はその値を最優先し、
+    未設定時は repo-local の .kraft/skills / skills を優先して探索する。
+    """
     configured = os.environ.get("KRAFT_SKILLS_DIR")
-    return Path(configured).expanduser().resolve() if configured else DEFAULT_SKILLS_DIR.resolve()
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    for candidate in repo_local_skill_dirs():
+        if candidate.exists():
+            return candidate.resolve()
+    return DEFAULT_SKILLS_DIR.resolve()
 
 
 def discover_skills(skills_dir: Optional[Path] = None) -> dict[str, dict[str, str]]:
-    """SKILL.md を持つスキルを走査して返す。"""
-    target_dir = skills_dir or resolve_skills_dir()
-    discovered: dict[str, dict[str, str]] = {}
-    if not target_dir.exists():
-        return discovered
+    """SKILL.md を持つスキルを走査して返す。
 
-    for skill_dir in sorted(target_dir.iterdir(), key=lambda p: p.name):
-        if not skill_dir.is_dir():
+    repo-local の skill を既定の user-global skill より優先し、
+    競合名がある場合は repo-local 側で上書きする。
+    """
+    if skills_dir is not None:
+        target_dirs = [skills_dir.resolve()]
+    else:
+        configured = os.environ.get("KRAFT_SKILLS_DIR")
+        if configured:
+            target_dirs = [Path(configured).expanduser().resolve()]
+        else:
+            repo_local_candidates = [
+                candidate.resolve()
+                for candidate in repo_local_skill_dirs()[:-1]
+                if candidate.exists()
+            ]
+            target_dirs = [DEFAULT_SKILLS_DIR.resolve(), *repo_local_candidates]
+
+    discovered: dict[str, dict[str, str]] = {}
+    for target_dir in target_dirs:
+        if not target_dir.exists():
             continue
-        skill_file = skill_dir / "SKILL.md"
-        if not skill_file.exists():
-            continue
-        try:
-            content = skill_file.read_text(encoding="utf-8", errors="replace").strip()
-        except OSError:
-            continue
-        discovered[skill_dir.name] = {
-            "description": normalize_text(extract_skill_description(content)),
-            "instructions": normalize_text(content),
-        }
+        for skill_dir in sorted(target_dir.iterdir(), key=lambda p: p.name):
+            if not skill_dir.is_dir():
+                continue
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_file.exists():
+                continue
+            try:
+                content = skill_file.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                continue
+            discovered[skill_dir.name] = {
+                "description": normalize_text(extract_skill_description(content)),
+                "instructions": normalize_text(content),
+            }
     return discovered
 
 

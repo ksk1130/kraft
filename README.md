@@ -24,21 +24,35 @@ Python ベースの CLI / エージェント実験プロジェクトです。
   - `AGENTS.md` を読む
   - 記憶や作業方針をシステムプロンプトへ注入
 - `SkillsMiddleware`
-  - `KRAFT_SKILLS_DIR` または既定の `%USERPROFILE%\.claude\skills` を探索
+  - repo-local の `.kraft/skills` / `skills` を優先し、`KRAFT_SKILLS_DIR` または既定の `%USERPROFILE%\.claude\skills` をフォールバックとして探索
   - `SKILL.md` を検出してスキル情報を読み込む
 
 ### 2. HITL 承認フロー
 
 危険なツール実行の前に承認を求めます。`interrupt_on` の設定で、特に `bash` / `edit_file` を停止対象にし、UI には `approval/hitl_prompt.py` を使います。
 
-### 3. セッション管理
+最小 dogfood 境界としては、read-only の検索・読込系は自動承認し、`bash` / `edit_file` / `git` / write / delete は確認必須にしています。
+
+### 3. repo-local スキル
+
+スキル探索の優先順は以下です。
+
+1. `KRAFT_SKILLS_DIR`（明示的な上書き）
+2. repo-local の `.kraft/skills`
+3. repo-local の `skills`
+4. `%USERPROFILE%\.claude\skills`
+
+これにより、リポジトリ固有の dogfood ルールを優先して読み込めます。
+
+### 4. セッション管理
 
 `src/kraft/agent.py` の `SessionManager` が会話履歴を `~/.kraft/sessions/<session_id>/` に保存し、再開・一覧表示・タイトル生成を行います。
 
-### 4. スキルの自動探索
+### 5. スキルの自動探索
 
-- 既定スキルソース: `%USERPROFILE%\.claude\skills`
-- 環境変数 `KRAFT_SKILLS_DIR` で上書き可能
+- repo-local priority: `.kraft/skills` / `skills`
+- 既定グローバル: `%USERPROFILE%\.claude\skills`
+- 環境変数 `KRAFT_SKILLS_DIR` で明示的に上書き可能
 - `discover_skills()` と `resolve_skills_dir()` で探索先を統一
 
 ## クイックスタート
@@ -48,6 +62,14 @@ Python ベースの CLI / エージェント実験プロジェクトです。
 ```bash
 uv sync
 ```
+
+### standard dogfood workflow を実行する
+
+```bash
+./scripts/dogfood.sh
+```
+
+`KRAFT_DOGFOOD_LOG_DIR` を設定すると、実行ログを任意の場所に残せます。
 
 ### 環境変数を設定する
 

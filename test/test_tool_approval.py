@@ -3,6 +3,9 @@
 import sys
 sys.path.insert(0, "src")
 
+from pathlib import Path
+
+from kraft.agent import discover_skills, resolve_skills_dir
 from kraft.approval import ToolApprovalGate, ToolContext, SAFE_TOOLS, DANGEROUS_TOOLS
 
 
@@ -34,16 +37,16 @@ def test_tool_context():
     assert ctx2.requires_confirmation()
     print("✓ Dangerous tool classification OK")
     
-    # Requires confirmation
+    # Read-only tool: auto-approved under the minimal dogfood boundary
     ctx3 = ToolContext(
         tool_name="grep_search",
         tool_args={"query": "password", "isRegexp": True},
         tool_description="Search in workspace"
     )
-    assert not ctx3.is_safe()
+    assert ctx3.is_safe()
     assert not ctx3.is_dangerous()
-    assert ctx3.requires_confirmation()
-    print("✓ Requires confirmation tool classification OK")
+    assert not ctx3.requires_confirmation()
+    print("✓ Read-only tool classification OK")
     
     # Auto approve if safe
     assert ctx.auto_approve_if_safe()
@@ -188,6 +191,20 @@ def test_tool_config():
         print(f"✓ {tool}: dangerous")
     
     print()
+
+
+def test_repo_local_skill_precedence(monkeypatch):
+    """repo-local の skill が user-global より優先されることを確認する."""
+    monkeypatch.delenv("KRAFT_SKILLS_DIR", raising=False)
+    repo_root = Path(__file__).resolve().parents[1]
+    local_dir = (repo_root / ".kraft" / "skills").resolve()
+
+    resolved = resolve_skills_dir()
+    assert resolved == local_dir
+
+    discovered = discover_skills()
+    assert "dogfood" in discovered
+    assert discovered["dogfood"]["instructions"].lower().find("read-only") >= 0
 
 
 if __name__ == "__main__":
