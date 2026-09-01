@@ -5,6 +5,7 @@ from .display_formatter import (
     console as rich_console,
     display_welcome,
     display_working,
+    display_spinner,
     display_final_answer,
     display_error,
     display_goodbye,
@@ -395,13 +396,16 @@ def main():
                 # ========================================
                 # エージェント実行ループ（HITL ゲート付き）
                 # ========================================
-                # ターン1: 初回実行
-                for output in app.stream(
-                    {"messages": messages_history + [{"role": "user", "content": user_message}]},
-                    config,
-                    stream_mode="values"
-                ):
-                    last_output = output
+                processing_message = "LLM が応答を生成中です... しばらくお待ちください"
+                display_working(processing_message)
+                with display_spinner(processing_message, spinner_style="dots"):
+                    # ターン1: 初回実行
+                    for output in app.stream(
+                        {"messages": messages_history + [{"role": "user", "content": user_message}]},
+                        config,
+                        stream_mode="values"
+                    ):
+                        last_output = output
                 
                 # ========================================
                 # HITL ゲートループ（複数ツール対応）
@@ -489,16 +493,17 @@ def main():
                         # ========================================
                         # Resume 実行（複数決定をまとめて送信）
                         # ========================================
-                        print(f"\n[処理中] {len(decisions_list)} 件の決定を反映して再開します...\n")
-                        
+                        resume_message = f"承認を反映して再開中です... ({len(decisions_list)} 件)"
+                        display_working(resume_message)
                         decisions = {"decisions": decisions_list}
-                        
-                        for resume_output in app.stream(
-                            Command(resume=decisions),
-                            config,
-                            stream_mode="values"
-                        ):
-                            last_output = resume_output
+
+                        with display_spinner(resume_message, spinner_style="dots"):
+                            for resume_output in app.stream(
+                                Command(resume=decisions),
+                                config,
+                                stream_mode="values"
+                            ):
+                                last_output = resume_output
                     else:
                         print("[!] Could not retrieve pending tool calls from AIMessage")
                         break
