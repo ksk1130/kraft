@@ -4,24 +4,31 @@
 """
 
 # 読み取り専用・副作用なし → 自動承認
+# dogfood の最小運用境界では、検索・読込系は低リスクとして自動許可する
 SAFE_TOOLS = {
     "current_time",      # 現在時刻取得
     "calculator",        # 計算のみ
     "letter_counter",    # 文字数カウント
+    "grep_search",       # ワークスペース検索
+    "read_skill",        # スキルファイル読込
+    "file_read",         # ファイル読込
+    "file_read_advanced",# ファイル読込（高度）
+    "session_list",      # セッション一覧取得
 }
 
 # ファイル削除・コマンド実行など危険な操作 → 常に確認
 DANGEROUS_TOOLS = {
     "bash",              # 任意コマンド実行
+    "git",               # git 操作（bash 経由の副作用を含む）
+    "edit_file",         # ファイル編集
     "file_editor",       # ファイル作成・編集・削除
+    "write_file",        # ファイル作成・上書き
+    "delete",            # ファイル削除
 }
 
-# 結果によっては機密情報を返す可能性 → 常に確認
+# 追加の確認対象（現在は自動承認には含めない）
 REQUIRES_CONFIRMATION = {
-    "grep_search",       # ワークスペース検索
-    "read_skill",        # スキルファイル読込
-    "file_read",         # ファイル読込
-    "file_read_advanced", # ファイル読込（高度）
+    "search_skills",     # スキル検索
 }
 
 
