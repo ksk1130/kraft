@@ -5,6 +5,9 @@ from .display_formatter import (
     console as rich_console,
     display_welcome,
     display_working,
+    display_spinner,
+    display_tool_execution_start,
+    display_tool_execution_end,
     display_final_answer,
     display_error,
     display_goodbye,
@@ -395,13 +398,15 @@ def main():
                 # ========================================
                 # エージェント実行ループ（HITL ゲート付き）
                 # ========================================
-                # ターン1: 初回実行
-                for output in app.stream(
-                    {"messages": messages_history + [{"role": "user", "content": user_message}]},
-                    config,
-                    stream_mode="values"
-                ):
-                    last_output = output
+                processing_message = "LLM が応答を生成中です... しばらくお待ちください"
+                with display_spinner(processing_message, spinner_style="dots"):
+                    # ターン1: 初回実行
+                    for output in app.stream(
+                        {"messages": messages_history + [{"role": "user", "content": user_message}]},
+                        config,
+                        stream_mode="values"
+                    ):
+                        last_output = output
                 
                 # ========================================
                 # HITL ゲートループ（複数ツール対応）
@@ -452,18 +457,19 @@ def main():
                     if ai_msg and hasattr(ai_msg, 'tool_calls') and ai_msg.tool_calls:
                         tool_calls = ai_msg.tool_calls
                         print(f"📋 承認待ちのツール: {len(tool_calls)} 件")
-                        
+
                         # 各ツール呼び出しについてユーザー確認
                         decisions_list = []
                         for idx, tool_call in enumerate(tool_calls, 1):
                             tool_name = tool_call.get('name', 'unknown_tool')
                             tool_args = tool_call.get('args', {})
                             tool_id = tool_call.get('id', 'unknown_id')
-                            
+
+                            display_tool_execution_start(tool_name)
                             print(f"\n[ツール {idx}/{len(tool_calls)}]")
                             print(f"  📝 実行対象: {tool_name}")
                             print(f"  📦 引数: {tool_args}")
-                            
+
                             # ========================================
                             # ユーザーによる承認/却下
                             # ミドルウェア側で hitl_prompt.py のデザインを使う
@@ -479,9 +485,11 @@ def main():
                             if approved:
                                 decision_obj = {"type": "approve"}
                                 user_decision = "承認"
+                                display_tool_execution_end(tool_name, success=True)
                             else:
                                 decision_obj = {"type": "reject", "message": "ユーザーがこのツール呼び出しを拒否しました"}
                                 user_decision = "拒否"
+                                display_tool_execution_end(tool_name, success=False)
 
                             print(f"  ✓ 決定: {user_decision}")
                             decisions_list.append(decision_obj)
@@ -489,16 +497,16 @@ def main():
                         # ========================================
                         # Resume 実行（複数決定をまとめて送信）
                         # ========================================
-                        print(f"\n[処理中] {len(decisions_list)} 件の決定を反映して再開します...\n")
-                        
+                        resume_message = f"承認を反映して再開中です... ({len(decisions_list)} 件)"
                         decisions = {"decisions": decisions_list}
-                        
-                        for resume_output in app.stream(
-                            Command(resume=decisions),
-                            config,
-                            stream_mode="values"
-                        ):
-                            last_output = resume_output
+
+                        with display_spinner(resume_message, spinner_style="dots"):
+                            for resume_output in app.stream(
+                                Command(resume=decisions),
+                                config,
+                                stream_mode="values"
+                            ):
+                                last_output = resume_output
                     else:
                         print("[!] Could not retrieve pending tool calls from AIMessage")
                         break
