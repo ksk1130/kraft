@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from rich.table import Table
 from rich.panel import Panel
 
