@@ -175,6 +175,10 @@ def main():
         '/session history',
         '/session delete',
         '/skills',
+        '/cd',
+        '/pwd',
+        '/cwd',
+        '/workspace',
         '/clear',
         '/help',
     ]
@@ -187,6 +191,10 @@ def main():
         '/session history': '現在のセッションの会話履歴を表示',
         '/session delete': 'セッションを削除',
         '/skills': 'ロード済みスキルを表示',
+        '/cd': '作業ディレクトリを切り替え',
+        '/pwd': '現在の作業ディレクトリを表示',
+        '/cwd': '現在の作業ディレクトリを表示',
+        '/workspace': '作業ディレクトリまたはワークスペースを表示/切替',
         '/clear': '会話履歴をクリア',
         '/help': 'コマンドヘルプを表示',
         'exit': 'チャットを終了',
@@ -204,6 +212,34 @@ def main():
     
     # プロンプト表示テキスト（HTML フォーマット）
     prompt_text = HTML('<b fg="#ffff00">➜</b> <b fg="#00d7ff">[You]:</b> ')
+
+    def change_working_directory(target_text: str | None, *, title: str = "現在の作業ディレクトリ") -> bool:
+        """作業ディレクトリの表示/切替を処理する。"""
+        if target_text is None or not target_text.strip():
+            rich_console.print(Panel(f"[cyan]{Path.cwd()}[/cyan]", title=f"[yellow bold]{title}[/yellow bold]"))
+            rich_console.print()
+            return True
+
+        target_path = Path(target_text).expanduser()
+        if not target_path.is_absolute():
+            target_path = (Path.cwd() / target_path).resolve()
+        else:
+            target_path = target_path.resolve()
+
+        if not target_path.exists():
+            rich_console.print(Panel(f"[yellow]パスが見つかりません: {target_path}[/yellow]", title="エラー"))
+            rich_console.print()
+            return False
+        if not target_path.is_dir():
+            rich_console.print(Panel(f"[yellow]ディレクトリではありません: {target_path}[/yellow]", title="エラー"))
+            rich_console.print()
+            return False
+
+        os.chdir(target_path)
+        os.environ["KRAFT_WORKSPACE_ROOT"] = str(target_path)
+        rich_console.print(Panel(f"[green]作業ディレクトリを変更しました: {target_path}[/green]", title="[cyan bold]作業ディレクトリ変更[/cyan bold]"))
+        rich_console.print()
+        return True
 
     # 複数行入力対応: Enter で送信、Esc+Enter で改行
     # shift-enter は prompt_toolkit の key name として invalid なので使わない
@@ -301,6 +337,41 @@ def main():
                     break
                 continue
             
+            # 作業ディレクトリ操作コマンド
+            if user_message.lower() in {"/pwd", "/cwd"}:
+                rich_console.print(Panel(f"[cyan]{Path.cwd()}[/cyan]", title="[yellow bold]現在の作業ディレクトリ[/yellow bold]"))
+                rich_console.print()
+                continue
+
+            if user_message.lower() == "/workspace":
+                rich_console.print(Panel(f"[cyan]{os.environ.get('KRAFT_WORKSPACE_ROOT', str(Path.cwd()))}[/cyan]", title="[yellow bold]ワークスペース[/yellow bold]"))
+                rich_console.print()
+                continue
+
+            if user_message.lower().startswith("/workspace "):
+                target_text = user_message[len("/workspace "):].strip()
+                if not target_text:
+                    rich_console.print(Panel("[yellow]/workspace [path] の形式で指定してください[/yellow]", title="エラー"))
+                    rich_console.print()
+                    continue
+                if change_working_directory(target_text, title="ワークスペース"):
+                    continue
+                continue
+
+            if user_message.lower().startswith("/cd "):
+                target_text = user_message[len("/cd "):].strip()
+                if not target_text:
+                    rich_console.print(Panel("[yellow]/cd <path> の形式で指定してください[/yellow]", title="エラー"))
+                    rich_console.print()
+                    continue
+                if change_working_directory(target_text):
+                    continue
+                continue
+
+            if user_message.lower() == "/cd":
+                change_working_directory(None)
+                continue
+
             # スキル表示コマンド
             if user_message.lower() == "/skills":
                 table = Table(title="[cyan bold]ロード済みスキル[/cyan bold]", show_header=True, header_style="bold cyan")
@@ -318,7 +389,7 @@ def main():
                     rich_console.print(Panel("[dim]スキルがロードされていません[/dim]", title="スキル一覧"))
                 rich_console.print()
                 continue
-            
+             
             # スキル検索コマンド
             if user_message.lower().startswith("/skill search "):
                 keyword = user_message[len("/skill search "):].strip()
@@ -359,11 +430,17 @@ def main():
   /session list     - セッション一覧を表示
   /session history  - 現在のセッションの履歴を表示
   /session delete   - 現在のセッションを削除
-
+ 
+[cyan bold]作業ディレクトリ:[/cyan bold]
+  /cd <path>       - 作業ディレクトリを変更
+  /pwd             - 現在の作業ディレクトリを表示
+  /cwd             - 現在の作業ディレクトリを表示
+  /workspace [path] - ワークスペース設定を表示/変更
+ 
 [cyan bold]スキル・ツール:[/cyan bold]
   /skills          - ロード済みスキルをすべて表示
   /skill search    - スキルをキーワード検索 (例: /skill search python)
-
+ 
 [cyan bold]その他:[/cyan bold]
   /clear           - 会話履歴をクリア
   /help            - このヘルプを表示
