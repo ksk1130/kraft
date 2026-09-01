@@ -425,17 +425,17 @@ def letter_counter(word: str, letter: str) -> int:
     return word.lower().count(letter.lower())
 
 
-def bash(command: str, shell: str = "powershell") -> str:
+def bash(command: str, shell: str = "powershell", stream_mode: str = "terminal") -> str:
     """
     Windows PowerShell または Git Bash でコマンドを実行する。
 
-    実行中の標準出力をターミナルへ流し、ユーザーが何を実行しているか
-    確認できるようにする。ただし最終的な戻り値としては、実行結果文字列
-    をそのまま返す。
+    実行中の標準出力をそのまま表示し、ユーザーが何を実行しているか
+    確認できるようにする。`stream_mode` で表示形式を切り替えられる。
 
     Args:
         command: 実行するコマンド文字列
         shell: 実行シェル。"powershell" (デフォルト) または "gitbash"
+        stream_mode: 表示形式。"terminal" (通常表示) または "chat" (会話画面風表示)
 
     Returns:
         コマンド実行結果の標準出力、またはエラーメッセージ
@@ -453,7 +453,10 @@ def bash(command: str, shell: str = "powershell") -> str:
         else:
             return f"[NG] 不明なシェル: {shell}。'powershell' または 'gitbash' を指定してください"
 
-        print(f"$ {command}")
+        if stream_mode.lower() == "chat":
+            print(f"[assistant] $ {command}")
+        else:
+            print(f"$ {command}")
         sys.stdout.flush()
 
         process = subprocess.Popen(
@@ -475,9 +478,16 @@ def bash(command: str, shell: str = "powershell") -> str:
         while True:
             chunk = process.stdout.readline()
             if chunk:
-                sys.stdout.write(chunk)
-                sys.stdout.flush()
                 output_chunks.append(chunk)
+                if stream_mode.lower() == "chat":
+                    text = chunk.rstrip("\r\n")
+                    if text:
+                        print(f"[assistant] {text}")
+                    else:
+                        print("[assistant]")
+                else:
+                    sys.stdout.write(chunk)
+                sys.stdout.flush()
                 continue
 
             if process.poll() is not None:
@@ -508,6 +518,7 @@ model = ChatOpenAI(
     api_key=os.environ.get("OPENAI_API_KEY"),
     model="gpt-4o-mini",
     temperature=0.7,
+    streaming=True,
 )
 
 # システムプロンプト（簡潔版）

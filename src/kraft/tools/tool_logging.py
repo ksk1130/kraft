@@ -36,11 +36,11 @@ def log_tool_start(tool_name: str, kwargs_dict: dict[str, Any] | None = None) ->
     _tool_start_times[tool_name] = time.time()
     
     ts = _get_timestamp()
-    msg = f"[{ts}] >>> {tool_name}"
+    msg = f"[{ts}] [assistant] 🔎 {tool_name} を実行中"
     if kwargs_dict:
         msg += f" (args: {kwargs_dict})"
     try:
-        _console.print(Text(msg, style="dim"))
+        _console.print(Text(msg, style="dim cyan"))
     except Exception:
         try:
             sys.__stdout__.write(msg + "\n")
@@ -64,12 +64,11 @@ def log_tool_success(tool_name: str, result_type: str | None = None) -> None:
         elapsed = (time.time() - _tool_start_times.pop(tool_name)) * 1000
         duration_ms = elapsed
     
-    msg = f"[{ts}] <<< {tool_name} (OK"
+    msg = f"[{ts}] [assistant] ✓ {tool_name} が完了"
     if result_type:
-        msg += f": {result_type}"
+        msg += f" ({result_type})"
     if duration_ms is not None:
         msg += f" | {duration_ms:.1f}ms"
-    msg += ")"
     
     try:
         _console.print(Text(msg, style="dim green"))

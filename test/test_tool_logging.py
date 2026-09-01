@@ -100,6 +100,44 @@ def test_bash_streams_output_to_terminal(monkeypatch, capsys):
     assert result == "hello\nworld"
 
 
+def test_bash_streams_output_in_chat_style(monkeypatch, capsys):
+    """bash は chat 形式でも実行ログを会話っぽく出力できる。"""
+
+    class FakeStdout:
+        def __init__(self, lines):
+            self._lines = iter(lines)
+
+        def readline(self):
+            try:
+                return next(self._lines)
+            except StopIteration:
+                return ""
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            self.stdout = FakeStdout(["first\n", "second\n"])
+
+        def poll(self):
+            return 0
+
+        def wait(self):
+            return 0
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+
+    result = bash("echo first && echo second", shell="powershell", stream_mode="chat")
+    captured = capsys.readouterr()
+
+    assert "echo first && echo second" in captured.out
+    assert "first" in captured.out
+    assert "second" in captured.out
+    assert "assistant" in captured.out.lower() or "command" in captured.out.lower()
+    assert result == "first\nsecond"
+
+
 if __name__ == "__main__":
     test_basic_logging()
     test_decorator()

@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import re
 import sys
 from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 from rich.markdown import Markdown
@@ -22,6 +23,8 @@ console = Console(
     force_interactive=False,
     width=100,
 )
+
+_live_working: Live | None = None
 
 
 def _detect_java_code(text: str) -> tuple[bool, str, str]:
@@ -232,14 +235,30 @@ def display_welcome() -> None:
 
 
 def display_working(message: str) -> None:
-    """作業中メッセージを薄くグレーで表示.
+    """作業中メッセージを同じ行で更新して表示.
     
-    ツール実行中やクエリ処理中など、途中経過を示す。
+    Rich の Live を使うことで、長時間の処理中でも画面が固定せず
+    進行状況が見えるようになる。
     
     Args:
         message: 表示するメッセージ.
     """
-    console.print(f"[dim]{message}[/dim]")
+    global _live_working
+
+    status = Text(f"[assistant] {message}", style="bold cyan")
+    if _live_working is None:
+        _live_working = Live(status, console=console, refresh_per_second=10, transient=False)
+        _live_working.start()
+    else:
+        _live_working.update(status)
+
+
+def stop_live_working() -> None:
+    """作業中表示を停止して、次の通常表示に戻す。"""
+    global _live_working
+    if _live_working is not None:
+        _live_working.stop()
+        _live_working = None
 
 
 def display_execution_mode(mode: str) -> None:
@@ -286,6 +305,7 @@ def display_final_answer(answer: str) -> None:
             border_style="green",
             padding=(1, 1),
         )
+    stop_live_working()
     console.print()
     console.print(answer_panel)
 
@@ -313,6 +333,7 @@ def display_error(error_message: str) -> None:
     Args:
         error_message: エラー説明.
     """
+    stop_live_working()
     error_panel = Panel(
         error_message,
         title="[bold red]ERROR[/bold red]",
@@ -474,6 +495,7 @@ __all__ = [
     "console",
     "display_welcome",
     "display_working",
+    "stop_live_working",
     "display_execution_mode",
     "display_final_answer",
     "display_key_finding",

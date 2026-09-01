@@ -7,16 +7,15 @@ from rich.panel import Panel
 from .display_formatter import (
     console as rich_console,
     display_welcome,
-    display_working,
-    display_spinner,
+    stop_live_working,
     display_tool_execution_start,
     display_tool_execution_end,
-    display_final_answer,
     display_error,
     display_goodbye,
     truncate_output,
 )
 from .dogfood import DogfoodAuditLogger, build_dogfood_steps
+from .streaming import LiveStreamRenderer, iter_stream_events
 
 
 def extract_agent_response(messages: list[object]) -> str:
@@ -461,32 +460,32 @@ def main():
                 display_goodbye()
                 break
             
-            # ユーザーメッセージを履歴に追加
-            messages_history.append({
-                "role": "user",
-                "content": user_message
-            })
-
             # DeepAgents にメッセージを送信して実行
             print()
+            live_renderer = LiveStreamRenderer()
             try:
                 from langgraph.types import Command
-                
+
+                # ユーザーメッセージを履歴に追加
+                messages_history.append({
+                    "role": "user",
+                    "content": user_message
+                })
+
                 agent_response = ""
                 last_output = None
                 
                 # ========================================
                 # エージェント実行ループ（HITL ゲート付き）
                 # ========================================
-                processing_message = "LLM が応答を生成中です... しばらくお待ちください"
-                with display_spinner(processing_message, spinner_style="dots"):
-                    # ターン1: 初回実行
-                    for output in app.stream(
-                        {"messages": messages_history + [{"role": "user", "content": user_message}]},
-                        config,
-                        stream_mode="values"
-                    ):
-                        last_output = output
+                latest_stream_text = ""
+                stream_input = {"messages": messages_history}
+                for raw_chunk in app.stream(stream_input, config, stream_mode="messages"):
+                    last_output = raw_chunk
+                    for event in iter_stream_events([raw_chunk]):
+                        live_renderer.handle_event(event)
+                agent_response = live_renderer.assistant_text.strip() or ""
+                latest_stream_text = live_renderer.assistant_text.strip()
                 
                 # ========================================
                 # HITL ゲートループ（複数ツール対応）
@@ -495,16 +494,8 @@ def main():
                 # 複数ツール呼び出しの場合、Resume 後も別の中断が起きるので while でループ
                 from langchain_core.messages import AIMessage
                 
-                # === DEBUG: 初回実行後の状態確認 ===
+                # 初回実行後の状態確認
                 state = app.get_state(config)
-                print(f"\n[DEBUG] After initial stream: state.next = {state.next}")
-                if hasattr(state, 'values') and 'messages' in state.values:
-                    messages = state.values['messages']
-                    if messages:
-                        last_msg = messages[-1]
-                        print(f"[DEBUG] Last message type: {type(last_msg).__name__}")
-                        if isinstance(last_msg, AIMessage):
-                            print(f"[DEBUG] Tool calls in last AIMessage: {len(last_msg.tool_calls) if hasattr(last_msg, 'tool_calls') else 0}")
                 
                 hitl_iterations = 0
                 MAX_HITL_ITERATIONS = 10  # 無限ループ防止
@@ -577,16 +568,14 @@ def main():
                         # ========================================
                         # Resume 実行（複数決定をまとめて送信）
                         # ========================================
-                        resume_message = f"承認を反映して再開中です... ({len(decisions_list)} 件)"
                         decisions = {"decisions": decisions_list}
 
-                        with display_spinner(resume_message, spinner_style="dots"):
-                            for resume_output in app.stream(
-                                Command(resume=decisions),
-                                config,
-                                stream_mode="values"
-                            ):
-                                last_output = resume_output
+                        for raw_chunk in app.stream(Command(resume=decisions), config, stream_mode="messages"):
+                            last_output = raw_chunk
+                            for event in iter_stream_events([raw_chunk]):
+                                live_renderer.handle_event(event)
+                        agent_response = live_renderer.assistant_text.strip() or agent_response
+                        latest_stream_text = live_renderer.assistant_text.strip() or latest_stream_text
                     else:
                         print("[!] Could not retrieve pending tool calls from AIMessage")
                         break
@@ -595,20 +584,27 @@ def main():
                     print("[!] HITL iterations exceeded limit - stopping")
                 
                 # 最後の出力からメッセージを抽出
-                if last_output and "messages" in last_output:
+                if isinstance(last_output, dict) and "messages" in last_output:
                     messages = last_output["messages"]
                     if messages:
                         agent_response = extract_agent_response(messages)
-                
+                elif isinstance(last_output, tuple) and last_output:
+                    candidate = last_output[0]
+                    if isinstance(candidate, dict) and "messages" in candidate:
+                        messages = candidate["messages"]
+                        if messages:
+                            agent_response = extract_agent_response(messages)
+
                 # 応答がない場合のフォールバック
                 if not agent_response:
-                    agent_response = "[No response from agent]"
+                    agent_response = latest_stream_text or "[No response from agent]"
                 
                 # トークン制限エラー回避：長い出力を制限
                 agent_response = truncate_output(agent_response, max_lines=100, max_chars=3000)
                 
-                # 最終回答をパネルで表示
-                display_final_answer(agent_response)
+                stop_live_working()
+                # Stream 表示はその場で完結させ、最終回答の二重パネル表示は行わない。
+                # 追跡・履歴保存は残しつつ、ユーザーには流れる表示そのものを見せる。
                 
                 messages_history.append({
                     "role": "assistant",
@@ -621,6 +617,8 @@ def main():
                 
             except Exception as e:
                 display_error(f"[red]{e}[/red]")
+            finally:
+                live_renderer.close()
         
         except KeyboardInterrupt:
             # 最後のメッセージ履歴を保存
