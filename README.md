@@ -63,6 +63,14 @@ Python ベースの CLI / エージェント実験プロジェクトです。
 uv sync
 ```
 
+### standard dogfood workflow を実行する
+
+```bash
+./scripts/dogfood.sh
+```
+
+`KRAFT_DOGFOOD_LOG_DIR` を設定すると、実行ログを任意の場所に残せます。
+
 ### 環境変数を設定する
 
 ```bash

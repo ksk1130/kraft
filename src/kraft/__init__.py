@@ -10,6 +10,7 @@ from .display_formatter import (
     display_goodbye,
     truncate_output,
 )
+from .dogfood import DogfoodAuditLogger, build_dogfood_steps
 
 
 def extract_agent_response(messages: list[object]) -> str:
